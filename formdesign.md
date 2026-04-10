@@ -65,7 +65,29 @@ formatting/
 
 ---
 
-## Workflow
+## Next Steps (pick up here)
+
+- [ ] Test `split_forms.py` on the full SCCR combined doc — verify tables are carried over correctly
+- [ ] Handle decimal form numbers (Form 17.1, Form 30.001) in filename and detection
+- [ ] Handle short forms with no all-caps name (returns "Unknown") — may need fallback
+- [ ] Once split is verified, wire up `format_template.py` to run automatically on each split form
+- [ ] Build `split_forms.py` into a single end-to-end pipeline: split → remove → format → placeholder → output to Formfiller templates
+
+---
+
+## The Dream Workflow
+
+Copy all raw court forms (e.g. SCCR Forms 1-125) into a single Word document and drop it in `data/raw forms/sccr/`. Then run one script that:
+
+1. Asks for province and court once at the start (same for all forms in the doc)
+2. Splits the combined doc by detecting `Form N` headings
+3. For each split form, auto-detects the form number and form name
+4. Runs the full pipeline on each: removal → formatting → placeholder insertion
+5. Outputs individually named, beautifully formatted `.docx` templates into Formfiller's `templates/` folder
+
+---
+
+## Workflow (current manual steps)
 
 1. Download raw court forms (combined Word doc)
 2. Run `split_forms.py` → individual raw files
