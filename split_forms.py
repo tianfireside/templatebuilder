@@ -9,68 +9,78 @@ import re
 from docx import Document
 from docx.oxml.ns import qn
 from copy import deepcopy
-from lxml import etree
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "..", "Formfiller", "templates")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def get_paragraph_text(elem):
+    """Get text from a w:p element."""
+    return "".join(t.text or "" for t in elem.iter(f"{{{W}}}t"))
 
 
 def is_form_header(text):
     """Returns form number if line is a Form N header, else None."""
-    match = re.match(r'^Form\s+(\d+)\b', text.strip(), re.IGNORECASE)
+    match = re.match(r'^Form\s+([\d.]+)\b', text.strip(), re.IGNORECASE)
     return match.group(1) if match else None
 
 
-def extract_form_name(paragraphs):
-    """Scan paragraphs for an all-caps line to use as the form name."""
-    for para in paragraphs:
-        t = para.text.strip()
-        if t.isupper() and len(t) > 5 and "RULE" not in t:
-            return t.title().replace(" ", "_")
+def extract_form_name(elements):
+    """Scan elements for an all-caps paragraph to use as the form name."""
+    for elem in elements:
+        if elem.tag == f"{{{W}}}p":
+            t = get_paragraph_text(elem).strip()
+            if t.isupper() and len(t) > 5 and "RULE" not in t:
+                return t.title().replace(" ", "_")
     return "Unknown"
 
 
 def split_forms(doc):
-    """Split doc into list of (form_number, [paragraphs])."""
+    """Split doc body elements into list of (form_number, [elements])."""
     forms = []
     current_num = None
-    current_paras = []
+    current_elems = []
 
-    for para in doc.paragraphs:
-        num = is_form_header(para.text)
-        if num:
-            if current_num is not None:
-                forms.append((current_num, current_paras))
-            current_num = num
-            current_paras = [para]
-        elif current_num is not None:
-            current_paras.append(para)
+    for elem in doc.element.body:
+        # Check if this is a paragraph with a Form N header
+        if elem.tag == f"{{{W}}}p":
+            text = get_paragraph_text(elem)
+            num  = is_form_header(text)
+            if num:
+                if current_num is not None:
+                    forms.append((current_num, current_elems))
+                current_num   = num
+                current_elems = [elem]
+                continue
+
+        if current_num is not None:
+            current_elems.append(elem)
 
     if current_num is not None:
-        forms.append((current_num, current_paras))
+        forms.append((current_num, current_elems))
 
     return forms
 
 
-def save_form(source_doc, paragraphs, out_path):
-    """Create a new doc with the given paragraphs and save it."""
+def save_form(elements, out_path):
+    """Create a new doc with the given elements and save it."""
     new_doc = Document()
 
     # Remove default empty paragraph
-    for para in new_doc.paragraphs:
-        p = para._element
-        p.getparent().remove(p)
-
     body = new_doc.element.body
-    for para in paragraphs:
-        body.append(deepcopy(para._element))
+    for child in list(body):
+        body.remove(child)
+
+    for elem in elements:
+        body.append(deepcopy(elem))
 
     new_doc.save(out_path)
 
 
 def main():
     print("\n" + "=" * 58)
-    print("  SCCR Form Splitter")
+    print("  Form Splitter")
     print("=" * 58)
 
     raw_path = input("\n  Path to combined Word doc: ").strip().strip('"')
@@ -89,12 +99,12 @@ def main():
 
     print(f"\n  Found {len(forms)} forms. Saving...\n")
 
-    for form_num, paragraphs in forms:
-        form_name = extract_form_name(paragraphs)
+    for form_num, elements in forms:
+        form_name = extract_form_name(elements)
         form_name = re.sub(r'[\n\r]+', '_', form_name).strip()
         filename  = f"FORM{form_num}_{province}_{court}_{form_name}.docx"
         out_path  = os.path.join(dest_dir, filename)
-        save_form(doc, paragraphs, out_path)
+        save_form(elements, out_path)
         print(f"  ✓ {filename}")
 
     print(f"\n  Done. Files saved to {dest_dir}\n")
