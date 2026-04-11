@@ -4,72 +4,54 @@ BC SCCR — Removal of unnecessary content
 
 import re
 
-KEEP_IF_CONTAINS = [
-    "Rule 22-3",
-    "Style of Proceeding",
-]
+W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
-def clear_cell(cell):
+def _elem_text(elem):
+    return "".join(t.text or "" for t in elem.iter(f"{{{W}}}t"))
+
+
+def _is_pure_instruction(text):
+    """True if the entire paragraph is a [bracketed instruction] with no Rule citation."""
+    t = text.strip()
+    if t == "[Style of Proceeding]":
+        return False  # expanded by template_change
+    if re.match(r"^\[.*\]$", t, re.DOTALL):
+        return not re.search(r"Rule\s+\d", t)
+    return False
+
+
+def _clear_cell(cell):
     for para in cell.paragraphs:
         for run in para.runs:
-            run.text = ""
-
-
-def rewrite_cell(cell, new_text):
-    """Clear all runs and write new_text into the first run of the first paragraph."""
-    first_run = None
-    for para in cell.paragraphs:
-        for run in para.runs:
-            if first_run is None:
-                first_run = run
-                first_run.text = new_text
-            else:
-                run.text = ""
-
-
-def rewrite_para(para, new_text):
-    """Clear all runs and write new_text into the first run."""
-    first_run = None
-    for run in para.runs:
-        if first_run is None:
-            first_run = run
-            first_run.text = new_text
-        else:
             run.text = ""
 
 
 def run(doc):
-    # Remove [brackets] from paragraphs — stop when Appendix is found
-    for para in doc.paragraphs:
-        t = para.text
-        if t.strip() == "Appendix":
+    # 1. Delete purely instructional paragraphs — stop at Appendix
+    to_delete = []
+    for p in doc.paragraphs:
+        if p.text.strip() == "Appendix":
             break
-        if re.search(r'\[.*?\]', t, re.DOTALL):
-            if not any(keep in t for keep in KEEP_IF_CONTAINS):
-                new_text = re.sub(r'\[.*?\]', '', t, flags=re.DOTALL).strip()
-                rewrite_para(para, new_text)
+        if _is_pure_instruction(p.text):
+            to_delete.append(p._element)
+    for elem in to_delete:
+        elem.getparent().remove(elem)
 
-    # Handle tables
+    # 2. Clear [type or print name] table cells
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
-                t = cell.text.strip()
+                if re.search(r"type or print name", cell.text, re.IGNORECASE):
+                    _clear_cell(cell)
 
-                # Only dots — remove entire cell
-                if re.match(r'^\.*$', t):
-                    clear_cell(cell)
-
-                # Date cell — keep label only e.g. "Date: "
-                elif re.search(r'dd/mmm/yyyy', t):
-                    label = re.match(r'^[^\[\.]*', t).group(0)
-                    rewrite_cell(cell, label)
-
-                # Checkbox cell — keep only "lawyer for plaintiff(s)"
-                elif re.search(r'\[[\s\xa0]*\].*\[[\s\xa0]*\]', t):
-                    kept = re.sub(r'.*\[[\s\xa0]*\]\s*', '', t).strip()
-                    rewrite_cell(cell, kept)
-
-                # [type or print name] — remove entire cell
-                elif re.search(r'type or print name', t):
-                    clear_cell(cell)
+    # 3. Remove trailing empty table
+    for elem in reversed(list(doc.element.body)):
+        tag = elem.tag.split("}")[-1]
+        if tag == "tbl":
+            if not _elem_text(elem).strip():
+                doc.element.body.remove(elem)
+            break
+        elif tag == "p":
+            if _elem_text(elem).strip():
+                break

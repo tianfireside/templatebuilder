@@ -59,31 +59,67 @@ def select_template():
     return templates[int(choice) - 1]
 
 
-def main():
-    template_path = select_template()
-    filename      = os.path.basename(template_path)
+def process_file(template_path):
+    filename        = os.path.basename(template_path)
     province, court = parse_filename(filename)
 
     if not province or not court:
-        print(f"\n  Error: could not parse province/court from filename: {filename}\n")
-        exit(1)
-
-    print(f"\n  Province: {province} | Court: {court}")
+        print(f"  SKIP  {filename}  (cannot parse province/court)")
+        return False
 
     key = (province, court)
     if key not in FORMAT_HANDLERS:
-        print(f"\n  Error: no formatting handler found for {province} {court}.\n")
-        exit(1)
+        print(f"  SKIP  {filename}  (no handler for {province} {court})")
+        return False
 
-    doc = Document(template_path)
+    try:
+        doc = Document(template_path)
+        for module_name in FORMAT_HANDLERS[key]:
+            handler = importlib.import_module(module_name)
+            handler.run(doc)
+        doc.save(template_path)
+        print(f"  ✓  {filename}")
+        return True
+    except Exception as e:
+        print(f"  ERR  {filename}  → {e}")
+        return False
 
-    for module_name in FORMAT_HANDLERS[key]:
-        handler = importlib.import_module(module_name)
-        handler.run(doc)
-        print(f"  ✓ {module_name}")
 
-    doc.save(template_path)
-    print(f"\n  Saved → {template_path}\n")
+def main():
+    print("\n" + "=" * 58)
+    print("  Template Formatter")
+    print("=" * 58)
+    print("\n  (1) Process a single template")
+    print("  (2) Batch process all files in data/split/")
+    mode = input("\n  Choice: ").strip()
+
+    if mode == "2":
+        split_dir = os.path.join(BASE_DIR, "data", "split")
+        files = []
+        for court_folder in sorted(os.listdir(split_dir)):
+            court_dir = os.path.join(split_dir, court_folder)
+            if not os.path.isdir(court_dir):
+                continue
+            for f in sorted(os.listdir(court_dir)):
+                if f.endswith(".docx") and not f.startswith("~$"):
+                    files.append(os.path.join(court_dir, f))
+
+        if not files:
+            print("\n  No .docx files found in data/split/\n")
+            exit(1)
+
+        print(f"\n  Found {len(files)} files.\n")
+        ok = err = skip = 0
+        for path in files:
+            result = process_file(path)
+            if result is True:   ok   += 1
+            elif result is False: skip += 1
+
+        print(f"\n  Done. {ok} processed, {skip} skipped.\n")
+
+    else:
+        template_path = select_template()
+        process_file(template_path)
 
 
 if __name__ == "__main__":
